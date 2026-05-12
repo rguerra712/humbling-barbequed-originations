@@ -5,7 +5,9 @@ TASK-6 — Customers want each document to have a short, memorable, speakable sl
 
 ## Approach
 
-**Slug generation via Gemini.** A new `lib/gemini.php` provides a single function `gemini_suggest_slugs(string $title): array` that returns up to 3 URL-safe slug strings. Slugs are lowercase, hyphen-separated words (e.g. `river-table-moon`), 2–4 words, using the `gemini-2.0-flash` model. The function first sends a PII-detection prompt; if Gemini flags the title as containing PII, it requests three random word combinations (called three separate times as the issue specifies). If no PII, it passes the title and asks Gemini for three creative but readable slugs. Any option that already exists in the `documents.slug` column is filtered out; missing slots are refilled by calling Gemini again until 3 unique options are available (or a retry ceiling is hit).
+**PII detection via local heuristic.** Before touching Gemini at all, a local `looks_like_pii(string $title): bool` function checks the title with regex patterns for common identifiers: email addresses (`/\S+@\S+\.\S+/`), US phone numbers (`/\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b/`), SSNs (`/\b\d{3}-\d{2}-\d{4}\b/`), and credit card numbers (`/\b\d{4}[- ]\d{4}[- ]\d{4}[- ]\d{4}\b/`). If any pattern matches, the title is treated as containing PII and is never sent to Gemini.
+
+**Slug generation via Gemini.** A new `lib/gemini.php` provides a single function `gemini_suggest_slugs(string $title): array` that returns up to 3 URL-safe slug strings. Slugs are lowercase, hyphen-separated words (e.g. `river-table-moon`), 2–4 words, using the `gemini-2.0-flash` model. If `looks_like_pii($title)` is true, Gemini is called three separate times asking for random word combinations (title never sent). If no PII, the title is passed to Gemini for three creative but readable slug suggestions. Any option that already exists in the `documents.slug` column is filtered out; missing slots are refilled by calling Gemini again until 3 unique options are available (or a retry ceiling is hit).
 
 **Gemini fallback.** If the Gemini API call fails (network error, quota exceeded, invalid key), the system falls back to a deterministic slug derived from the document title: lowercased, non-alphanumeric characters replaced with hyphens, consecutive hyphens collapsed (e.g. "Q3 Revenue (Draft)" → `q3-revenue-draft`). If that slug already exists in the DB, a random 4-digit number is appended and retried until a unique slug is found (e.g. `q3-revenue-draft-4821`). This ensures document creation never fails due to Gemini unavailability.
 
@@ -13,18 +15,19 @@ TASK-6 — Customers want each document to have a short, memorable, speakable sl
 
 **Slug as document identity, token as share privacy.** The slug lives on `documents`, not on `shares`. Admin pages use the slug to display and identify documents; the recipient-facing `view.php` continues to use the opaque hex token from `shares`. This preserves the privacy guarantee: recipients cannot enumerate documents by guessing slugs. The slug column is indexed for fast lookups and future search features (TASK-7).
 
-**API key security.** `GEMINI_API_KEY` is read from the container environment. `docker-compose.yml` is updated with `environment: - GEMINI_API_KEY=${GEMINI_API_KEY}`, which reads the value from the operator's shell at `docker compose up` time — the key is never written to any file in the repo. A `.env.example` (no real values) is committed to document the required variable. The actual `.env` (if the developer creates one) must be in `.gitignore`. Alternative: Docker Secrets (swarm-mode only) or a secrets manager, which is overkill for local dev but worth noting in the plan.
+**API key security.** `GEMINI_API_KEY` is set in the developer's `~/.zshrc` and read by `docker-compose.yml` via `environment: - GEMINI_API_KEY=${GEMINI_API_KEY}` — the key is never written to any file in the repo. `README.md` documents that the key must be exported in the shell before running `docker compose up`. A `.env.example` (no real values) is committed as a reference for what variables are required.
 
 ## Files to change
 
 | File | Change |
 |------|--------|
-| `lib/gemini.php` | New file. `gemini_suggest_slugs(string $title): array` — PII detection, suggestion generation, uniqueness filtering, title-based fallback on API failure. |
+| `lib/gemini.php` | New file. `looks_like_pii(string $title): bool` (local heuristic) + `gemini_suggest_slugs(string $title): array` — suggestion generation, uniqueness filtering, title-based fallback on API failure. |
 | `public/admin.php` | Two-step creation flow: step 1 calls Gemini and renders slug choices; step 2 validates slug and inserts document. Display slug in the documents table. |
 | `migrations/002_add_document_slug.sql` | Add `slug TEXT UNIQUE` column to `documents`; create index for searchability. |
 | `seed.php` | Assign a static slug to the seeded document so tests have a known baseline and the unique constraint is satisfied on seed. |
 | `docker-compose.yml` | Add `environment: - GEMINI_API_KEY=${GEMINI_API_KEY}` to the `app` service. |
-| `.env.example` | New file documenting `GEMINI_API_KEY=` (no value). |
+| `README.md` | Document that `GEMINI_API_KEY` must be exported in the shell before running `docker compose up`. |
+| `.env.example` | New file listing `GEMINI_API_KEY=` (no value) as a reference. |
 | `.gitignore` | Ensure `.env` is listed (add if absent). |
 | `tests/test.php` | Tests per acceptance criteria (see below). |
 
@@ -44,22 +47,24 @@ Note: `UNIQUE` on a nullable column in SQLite allows multiple NULLs, so existing
 
 - **Two-step server-side form vs. single-step with JS**: Chose server-side two-step for consistency with the app's no-framework, no-JS philosophy. The downside is one extra round-trip per document creation. A JavaScript approach (fetch slug options via AJAX, inject radio buttons) would be faster UX but adds complexity and breaks the pattern.
 
-- **Gemini for PII detection vs. heuristic regex**: Chose Gemini for PII detection because the issue explicitly calls for Gemini API usage throughout the feature, and LLM-based detection handles novel PII patterns (names, medical terms, internal codes) that regex would miss. Downside: extra API call per document creation and latency. A simple heuristic (email regex, SSN pattern) is faster but less accurate.
+- **Local heuristic for PII detection vs. Gemini**: Chose local regex because the whole point of the PII check is to avoid sending sensitive data to Gemini. Patterns cover email addresses, US phone numbers, SSNs, and credit card numbers. Downside: misses non-standard PII formats (e.g. employee IDs, internal codes), but these are acceptable false negatives — the worst case is Gemini sees a title it shouldn't, not that PII leaks to a recipient.
 
 - **Slug uniqueness retry vs. user error**: Chose silent retry (call Gemini again for a replacement when a suggested slug already exists) so the user always sees 3 valid choices. The alternative — showing fewer options and explaining why — is more transparent but worse UX for a rare edge case.
 
-- **`.env` file vs. shell export for API key**: Recommending shell `export GEMINI_API_KEY=...` (or `~/.zshrc`/`~/.bashrc`) as primary approach. A `.env` file with `docker compose --env-file` is a common alternative but risks accidental commit. Both approaches are documented in `.env.example`.
-
 ## Open questions
 
-- **Slug editability**: Should staff be able to change a document's slug after creation? The issue doesn't mention it; this plan treats it as out of scope.
-- **Slug collision under load**: With 3 calls for random words and a small vocabulary, collision probability grows with document count. For this app's scale it's acceptable; flag for future if document volume grows.
-
-_Resolved:_ Slug format confirmed as lowercase hyphen-separated, 2–4 words. Gemini model confirmed as `gemini-2.0-flash`. Fallback on Gemini failure: slugify the title (lowercase + dashes); if that slug exists, append a random 4-digit number and retry.
+_All resolved:_
+- Slug format: confirmed lowercase hyphen-separated, 2–4 words.
+- Gemini model: confirmed `gemini-2.0-flash`.
+- Fallback on Gemini failure: slugify title (lowercase + dashes); if collision, append random 4-digit number and retry.
+- Slug editability: not in scope.
+- Slug collision under load: acceptable for current scope.
+- API key: developer sets in `~/.zshrc`; `docker-compose.yml` reads from shell env.
 
 ## Out of scope
 
 - **Regenerating slug options**: The issue explicitly says "Not in scope: Generating different options." Staff must choose from the 3 presented.
-- **Using slug in view URLs**: Slugs appear in admin UI only. `view.php` continues to use hex tokens. Changing view URLs would break existing share links.
+- **Using slug in view URLs**: Slugs appear in admin UI only. `view.php` continues to use hex tokens. Changing view URLs would break existing share links and is a future extension.
 - **Slug search / lookup by slug on the public side**: The index is added now for future use (TASK-7 share-by-name), but no public-facing lookup by slug is implemented here.
 - **Slug for existing documents**: Only new documents get slugs. A backfill migration for existing documents is out of scope.
+- **Slug editability**: Not in scope.
