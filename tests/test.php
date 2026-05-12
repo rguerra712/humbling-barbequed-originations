@@ -171,5 +171,114 @@ test('gemini_suggest_slugs returns at least one URL-safe slug (fallback when no 
     }
 });
 
+// --- Gemini flow tests (mock-based) ---
+
+function with_gemini_mock(callable $mock, callable $test): void {
+    global $_gemini_http_caller;
+    $savedKey = getenv('GEMINI_API_KEY');
+    putenv('GEMINI_API_KEY=mock-key');
+    $_gemini_http_caller = $mock;
+    try {
+        $test();
+    } finally {
+        $_gemini_http_caller = null;
+        putenv($savedKey !== false && $savedKey !== '' ? "GEMINI_API_KEY=$savedKey" : 'GEMINI_API_KEY=');
+    }
+}
+
+test('gemini_suggest_slugs: returns 3 slugs when Gemini responds with 3 lines', function () {
+    with_gemini_mock(
+        fn($key, $prompt) => "bright-river-moon\nsilver-cloud-peak\nquick-fox-dale",
+        function () {
+            $slugs = gemini_suggest_slugs('Annual Report');
+            assert_true(count($slugs) === 3, 'expected 3 slugs, got ' . count($slugs) . ': ' . implode(', ', $slugs));
+            assert_true(in_array('bright-river-moon', $slugs), 'expected bright-river-moon in results');
+            assert_true(in_array('silver-cloud-peak', $slugs), 'expected silver-cloud-peak in results');
+            assert_true(in_array('quick-fox-dale', $slugs),    'expected quick-fox-dale in results');
+        }
+    );
+});
+
+test('gemini_suggest_slugs: filters taken slugs and retries for replacements', function () {
+    $callCount = 0;
+    with_gemini_mock(
+        function ($key, $prompt) use (&$callCount) {
+            $callCount++;
+            // First response includes welcome-packet which is already seeded
+            return $callCount === 1
+                ? "welcome-packet\nunique-blue-sky\ngreen-forest-path"
+                : "fresh-autumn-leaf\ndeep-ocean-blue\nhigh-mountain-pass";
+        },
+        function () use (&$callCount) {
+            $slugs = gemini_suggest_slugs('New Document');
+            assert_true(!in_array('welcome-packet', $slugs), 'taken slug must not appear in results');
+            assert_true(count($slugs) === 3, 'expected 3 slugs after retry, got ' . count($slugs));
+            assert_true($callCount >= 2, 'expected Gemini to be called again for replacement');
+        }
+    );
+});
+
+test('gemini_suggest_slugs: PII title — prompt never contains the title', function () {
+    $capturedPrompts = [];
+    $piiTitle = 'Contact admin@example.com for access';
+    with_gemini_mock(
+        function ($key, $prompt) use (&$capturedPrompts) {
+            $capturedPrompts[] = $prompt;
+            return 'random-word-slug';
+        },
+        function () use ($piiTitle, &$capturedPrompts) {
+            gemini_suggest_slugs($piiTitle);
+            assert_true(count($capturedPrompts) > 0, 'expected Gemini to be called');
+            foreach ($capturedPrompts as $p) {
+                assert_true(strpos($p, 'admin@example.com') === false, 'PII email must not appear in Gemini prompt');
+                assert_true(strpos($p, $piiTitle) === false, 'full PII title must not appear in Gemini prompt');
+            }
+        }
+    );
+});
+
+test('gemini_suggest_slugs: all API calls returning null triggers fallback', function () {
+    with_gemini_mock(
+        fn($key, $prompt) => null,
+        function () {
+            $slugs = gemini_suggest_slugs('Fallback Test Document');
+            assert_true(count($slugs) === 1, 'expected exactly 1 fallback slug, got ' . count($slugs));
+            assert_true(preg_match('/^fallback-test-document/', $slugs[0]) === 1,
+                'expected title-derived fallback slug, got: ' . $slugs[0]);
+        }
+    );
+});
+
+test('gemini_suggest_slugs: each slug in results is URL-safe', function () {
+    with_gemini_mock(
+        fn($key, $prompt) => "Valid Slug One\n  UPPER-CASE  \nspecial!@#chars",
+        function () {
+            $slugs = gemini_suggest_slugs('Test');
+            foreach ($slugs as $slug) {
+                assert_true(
+                    preg_match('/^[a-z0-9-]+$/', $slug) === 1,
+                    "slug '$slug' is not URL-safe"
+                );
+            }
+        }
+    );
+});
+
+// Integration test — only meaningful when GEMINI_API_KEY is set
+test('gemini_suggest_slugs: integration — real API returns URL-safe slugs', function () {
+    $apiKey = getenv('GEMINI_API_KEY');
+    if (!$apiKey) {
+        echo "        (skipped — GEMINI_API_KEY not set)\n";
+        return;
+    }
+    $slugs = gemini_suggest_slugs('Product Launch Announcement');
+    assert_true(count($slugs) >= 1, 'expected at least 1 slug from real Gemini API');
+    assert_true(count($slugs) <= 3, 'expected at most 3 slugs');
+    foreach ($slugs as $slug) {
+        assert_true(preg_match('/^[a-z0-9-]+$/', $slug) === 1, 'slug must be URL-safe: ' . $slug);
+        assert_true(strlen($slug) >= 3, 'slug too short: ' . $slug);
+    }
+});
+
 echo "\n{$pass} passed, {$fail} failed.\n";
 exit($fail > 0 ? 1 : 0);

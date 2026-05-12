@@ -1,5 +1,8 @@
 <?php
 
+// Set to a callable(string $apiKey, string $prompt): ?string to override HTTP in tests.
+$_gemini_http_caller = null;
+
 function looks_like_pii(string $title): bool {
     $patterns = [
         '/\S+@\S+\.\S+/',                           // email address
@@ -15,24 +18,47 @@ function looks_like_pii(string $title): bool {
     return false;
 }
 
+function _gemini_log(string $level, string $msg): void {
+    error_log("[gemini][$level] $msg");
+}
+
 function _gemini_http_call(string $apiKey, string $prompt): ?string {
+    global $_gemini_http_caller;
+    if (is_callable($_gemini_http_caller)) {
+        return call_user_func($_gemini_http_caller, $apiKey, $prompt);
+    }
+
     $url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' . urlencode($apiKey);
-    $body = json_encode(['contents' => [['parts' => [['text' => $prompt]]]]]);
+    $payload = json_encode(['contents' => [['parts' => [['text' => $prompt]]]]]);
     $ctx = stream_context_create([
         'http' => [
             'method'        => 'POST',
             'header'        => "Content-Type: application/json\r\n",
-            'content'       => $body,
+            'content'       => $payload,
             'timeout'       => 10,
             'ignore_errors' => true,
         ],
     ]);
-    $result = @file_get_contents($url, false, $ctx);
-    if ($result === false) {
+
+    error_clear_last();
+    $raw = @file_get_contents($url, false, $ctx);
+    if ($raw === false) {
+        $err = error_get_last();
+        _gemini_log('error', 'HTTP request failed: ' . ($err['message'] ?? 'unknown — check SSL/network'));
         return null;
     }
-    $data = json_decode($result, true);
-    return $data['candidates'][0]['content']['parts'][0]['text'] ?? null;
+
+    $data = json_decode($raw, true);
+    if (isset($data['error'])) {
+        _gemini_log('error', 'Gemini API error ' . ($data['error']['code'] ?? '?') . ': ' . ($data['error']['message'] ?? ''));
+        return null;
+    }
+
+    $text = $data['candidates'][0]['content']['parts'][0]['text'] ?? null;
+    if ($text === null) {
+        _gemini_log('warn', 'Unexpected Gemini response shape: ' . substr($raw, 0, 300));
+    }
+    return $text;
 }
 
 function _sanitize_slug(string $raw): string {
@@ -63,43 +89,51 @@ function _slug_fallback(string $title): string {
 function gemini_suggest_slugs(string $title): array {
     $apiKey = getenv('GEMINI_API_KEY');
     if (!$apiKey) {
+        _gemini_log('warn', 'GEMINI_API_KEY not set — using title-based fallback slug');
         return [_slug_fallback($title)];
     }
 
     $pii = looks_like_pii($title);
+    if ($pii) {
+        _gemini_log('info', 'Title flagged as PII — requesting random-word slugs (title withheld from Gemini)');
+    }
+
     $collected = [];
+    $anySuccess = false;
     $maxAttempts = 5;
 
     for ($attempt = 0; $attempt < $maxAttempts && count($collected) < 3; $attempt++) {
         $need = 3 - count($collected);
-        $newRaw = [];
+        $batch = [];
 
         if ($pii) {
-            // Separate call per slug — title is never sent to Gemini
             for ($i = 0; $i < $need; $i++) {
                 $prompt = 'Generate a URL-safe slug of 2–4 lowercase hyphen-separated random English words. Return only the slug itself, nothing else. Example: river-table-moon';
-                $raw = _gemini_http_call($apiKey, $prompt);
-                if ($raw !== null) {
-                    $slug = _sanitize_slug(strtok(trim($raw), "\n"));
+                $text = _gemini_http_call($apiKey, $prompt);
+                if ($text !== null) {
+                    $anySuccess = true;
+                    $slug = _sanitize_slug(strtok(trim($text), "\n"));
                     if ($slug !== '') {
-                        $newRaw[] = $slug;
+                        $batch[] = $slug;
                     }
                 }
             }
         } else {
-            $prompt = "Generate {$need} URL-safe slug(s) for a document titled \"{$title}\". Each slug must be 2–4 lowercase hyphen-separated words. Return exactly {$need} slug(s), one per line, no numbering or extra text.";
-            $raw = _gemini_http_call($apiKey, $prompt);
-            if ($raw !== null) {
-                foreach (explode("\n", $raw) as $line) {
+            $noun = $need === 1 ? 'slug' : 'slugs';
+            $prompt = "Generate $need URL-safe $noun for a document titled \"$title\". Each slug must be 2–4 lowercase hyphen-separated words. Return exactly $need $noun, one per line, no numbering or extra text.";
+            $text = _gemini_http_call($apiKey, $prompt);
+            if ($text !== null) {
+                $anySuccess = true;
+                foreach (explode("\n", $text) as $line) {
                     $slug = _sanitize_slug(trim($line));
                     if ($slug !== '') {
-                        $newRaw[] = $slug;
+                        $batch[] = $slug;
                     }
                 }
             }
         }
 
-        foreach ($newRaw as $slug) {
+        foreach ($batch as $slug) {
             if (!_slug_exists($slug) && !in_array($slug, $collected, true)) {
                 $collected[] = $slug;
                 if (count($collected) >= 3) {
@@ -109,9 +143,12 @@ function gemini_suggest_slugs(string $title): array {
         }
     }
 
-    // Fallback if Gemini produced nothing usable
     if (empty($collected)) {
+        $reason = $anySuccess ? 'all suggestions were already taken' : 'all API calls failed';
+        _gemini_log('error', "No usable slugs from Gemini ($reason) — falling back to title-based slug");
         $collected[] = _slug_fallback($title);
+    } else {
+        _gemini_log('info', 'Returning ' . count($collected) . ' slug(s): ' . implode(', ', $collected));
     }
 
     return array_values($collected);
