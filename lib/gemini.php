@@ -28,7 +28,7 @@ function _gemini_http_call(string $apiKey, string $prompt): ?string {
         return call_user_func($_gemini_http_caller, $apiKey, $prompt);
     }
 
-    $url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' . urlencode($apiKey);
+    $url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' . urlencode($apiKey);
     $payload = json_encode(['contents' => [['parts' => [['text' => $prompt]]]]]);
     $ctx = stream_context_create([
         'http' => [
