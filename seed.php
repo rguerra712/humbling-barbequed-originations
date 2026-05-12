@@ -10,18 +10,21 @@ if (file_exists($dbPath)) {
 $pdo = db();
 $pdo->exec(file_get_contents(__DIR__ . '/schema.sql'));
 
+system('php ' . escapeshellarg(__DIR__ . '/migrate.php') . ' > /dev/null');
+
 $pdo->exec("
     INSERT INTO staff (email, name) VALUES
         ('freddy@folio.example', 'Freddy Folio')
 ");
 
 $stmt = $pdo->prepare('
-    INSERT INTO documents (title, body, created_by)
-    VALUES (?, ?, 1)
+    INSERT INTO documents (title, body, slug, created_by)
+    VALUES (?, ?, ?, 1)
 ');
 $stmt->execute([
     'Welcome Packet',
     "Welcome to Folio!\n\nThis is the body of your welcome packet.",
+    'welcome-packet',
 ]);
 $docId = (int) $pdo->lastInsertId();
 
