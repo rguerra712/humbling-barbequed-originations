@@ -1,0 +1,20 @@
+---
+description: Use CLAUDE.md as the single source for commands, architecture, and agent workflow
+alwaysApply: true
+---
+
+# Project context
+
+Do **not** infer stack, commands, or agent procedures from the repo layout alone.
+
+1. **Read `CLAUDE.md` at the start of substantive work** in this repository (or when anything is ambiguous). It is the authoritative guide for:
+   - **Commands** — how to run the app, tests, and seeds (`docker compose`, PHP tests, Node integration tests if applicable).
+   - **Architecture** — PHP layout, bootstrap, pages, data flow, conventions (`h()`, `audit_log()`, timezone, tokens).
+   - **Tests and migrations** — where to add tests and how schema changes are applied.
+   - **Agent workflow** — worktree isolation, branch naming (`TASK-#/...`), commit/push expectations for subagents.
+
+2. **Prefer acting on `CLAUDE.md`** over guessing: run the documented commands, follow the documented patterns, and follow the documented agent steps when spawning or acting as a subagent.
+
+3. **Avoid duplicating** long explanations from `CLAUDE.md` in chat when a short pointer plus the file is enough; cite or follow the file instead.
+
+If `CLAUDE.md` is missing or clearly outdated, say so and align changes with the existing codebase before expanding scope.
