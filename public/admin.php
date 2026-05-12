@@ -37,16 +37,8 @@ $docs = db()->query('
 render_header('Admin', $staff);
 ?>
 
-<div class="page-header-row">
-    <div>
-        <h1 class="page-title">Admin</h1>
-        <p class="page-subtitle">Create documents and generate share links for recipients.</p>
-    </div>
-    <form method="get" action="/results.php" class="search-form">
-        <input type="search" name="q" placeholder="Search documents…" required>
-        <button type="submit" class="btn">Search</button>
-    </form>
-</div>
+<h1 class="page-title">Admin</h1>
+<p class="page-subtitle">Create documents and generate share links for recipients.</p>
 
 <?php if (!empty($_GET['created'])): ?>
     <div class="banner banner-success">Document #<?= (int) $_GET['created'] ?> created.</div>
@@ -70,6 +62,11 @@ render_header('Admin', $staff);
         <button type="submit" class="btn">Create document</button>
     </form>
 </section>
+
+<form method="get" action="/results.php" class="search-form">
+    <input type="search" name="q" placeholder="Search documents by title…" required>
+    <button type="submit" class="btn">Search</button>
+</form>
 
 <section class="card">
     <h2 class="card-title">Documents</h2>

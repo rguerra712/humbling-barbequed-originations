@@ -303,6 +303,30 @@ table.data td.id {
     font-size: 0.95rem;
 }
 
+.search-form {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.search-form input[type=search] {
+    width: 220px;
+    padding: 0.55rem 0.75rem;
+    font: inherit;
+    font-size: 0.92rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface);
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.search-form input[type=search]:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.15);
+}
+
 .empty {
     text-align: center;
     color: var(--text-muted);

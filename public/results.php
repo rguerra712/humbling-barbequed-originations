@@ -38,19 +38,19 @@ render_header('Search results', $staff);
 
 <a href="/admin.php" class="back-link">← back to admin</a>
 
-<div class="page-header-row">
-    <h1 class="page-title">
-        <?php if ($q !== ''): ?>
-            Results for "<?= h($q) ?>"
-        <?php else: ?>
-            Search documents
-        <?php endif ?>
-    </h1>
-    <form method="get" action="/results.php" class="search-form">
-        <input type="search" name="q" value="<?= h($q) ?>" placeholder="Search documents…" required>
-        <button type="submit" class="btn">Search</button>
-    </form>
-</div>
+<h1 class="page-title">
+    <?php if ($q !== ''): ?>
+        Results for "<?= h($q) ?>"
+    <?php else: ?>
+        Search documents
+    <?php endif ?>
+</h1>
+<p class="page-subtitle">Search documents by title to create a share link.</p>
+
+<form method="get" action="/results.php" class="search-form">
+    <input type="search" name="q" value="<?= h($q) ?>" placeholder="Search documents by title…" required>
+    <button type="submit" class="btn">Search</button>
+</form>
 
 <?php if ($q === ''): ?>
     <p class="empty">Enter a search term above.</p>
