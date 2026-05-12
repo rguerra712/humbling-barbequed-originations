@@ -37,8 +37,16 @@ $docs = db()->query('
 render_header('Admin', $staff);
 ?>
 
-<h1 class="page-title">Admin</h1>
-<p class="page-subtitle">Create documents and generate share links for recipients.</p>
+<div class="page-header-row">
+    <div>
+        <h1 class="page-title">Admin</h1>
+        <p class="page-subtitle">Create documents and generate share links for recipients.</p>
+    </div>
+    <form method="get" action="/results.php" class="search-form">
+        <input type="search" name="q" placeholder="Search documents…" required>
+        <button type="submit" class="btn">Search</button>
+    </form>
+</div>
 
 <?php if (!empty($_GET['created'])): ?>
     <div class="banner banner-success">Document #<?= (int) $_GET['created'] ?> created.</div>

@@ -69,5 +69,54 @@ test('migrate.php creates schema_migrations table and records applied files', fu
     }
 });
 
+// Helper: run the ranked search query directly against the DB
+function search_docs(string $q): array {
+    $stmt = db()->prepare('
+        SELECT *,
+          CASE
+            WHEN lower(title) = lower(:q)           THEN 0
+            WHEN lower(title) LIKE lower(:q) || \'%\' THEN 1
+            ELSE                                         2
+          END AS match_rank
+        FROM documents
+        WHERE lower(title) LIKE \'%\' || lower(:q) || \'%\'
+        ORDER BY match_rank ASC, title ASC
+        LIMIT 50
+    ');
+    $stmt->execute([':q' => $q]);
+    return $stmt->fetchAll();
+}
+
+test('search exact match returns rank 0', function () {
+    $rows = search_docs('Welcome Packet');
+    assert_true(count($rows) >= 1, 'expected at least one result');
+    assert_true((int) $rows[0]['match_rank'] === 0, 'expected rank 0 for exact match, got ' . $rows[0]['match_rank']);
+    assert_true($rows[0]['title'] === 'Welcome Packet', 'unexpected title: ' . $rows[0]['title']);
+});
+
+test('search prefix match returns rank 1', function () {
+    $rows = search_docs('Welcome');
+    assert_true(count($rows) >= 1, 'expected at least one result');
+    assert_true((int) $rows[0]['match_rank'] === 1, 'expected rank 1 for prefix match, got ' . $rows[0]['match_rank']);
+});
+
+test('search contains match returns rank 2', function () {
+    $rows = search_docs('Packet');
+    assert_true(count($rows) >= 1, 'expected at least one result for contains match');
+    // "Welcome Packet" does not start with "Packet", so it should be rank 2
+    assert_true((int) $rows[0]['match_rank'] === 2, 'expected rank 2 for contains-only match, got ' . $rows[0]['match_rank']);
+});
+
+test('search is case-insensitive', function () {
+    $rows = search_docs('WELCOME PACKET');
+    assert_true(count($rows) >= 1, 'expected result for uppercase query');
+    assert_true((int) $rows[0]['match_rank'] === 0, 'expected rank 0 for case-insensitive exact match, got ' . $rows[0]['match_rank']);
+});
+
+test('search returns empty for no match', function () {
+    $rows = search_docs('zzz_no_such_document_zzz');
+    assert_true(count($rows) === 0, 'expected no results for unmatched query');
+});
+
 echo "\n{$pass} passed, {$fail} failed.\n";
 exit($fail > 0 ? 1 : 0);
