@@ -140,7 +140,6 @@ test('slug uniqueness constraint prevents duplicate slugs', function () {
 });
 
 test('_slug_fallback generates URL-safe slug from title', function () {
-    // Insert a doc with slug 'test-doc' first to ensure no collision on the base
     db()->prepare('INSERT INTO documents (title, body, slug, created_by) VALUES (?, ?, ?, 1)')
         ->execute(['Test Doc Source', 'body', 'test-doc-source']);
     $slug = _slug_fallback('Test Doc Source !!');
@@ -150,7 +149,6 @@ test('_slug_fallback generates URL-safe slug from title', function () {
 });
 
 test('_slug_fallback appends numeric suffix when base slug is taken', function () {
-    // welcome-packet is taken by the seeded document
     $slug = _slug_fallback('Welcome Packet');
     assert_true($slug !== 'welcome-packet', 'expected suffix since welcome-packet is already taken');
     assert_true(preg_match('/^welcome-packet-\d{4}$/', $slug) === 1, 'expected welcome-packet-NNNN format, got: ' . $slug);
@@ -204,7 +202,6 @@ test('gemini_suggest_slugs: filters taken slugs and retries for replacements', f
     with_gemini_mock(
         function ($key, $prompt) use (&$callCount) {
             $callCount++;
-            // First response includes welcome-packet which is already seeded
             return $callCount === 1
                 ? "welcome-packet\nunique-blue-sky\ngreen-forest-path"
                 : "fresh-autumn-leaf\ndeep-ocean-blue\nhigh-mountain-pass";
@@ -278,6 +275,56 @@ test('gemini_suggest_slugs: integration — real API returns URL-safe slugs', fu
         assert_true(preg_match('/^[a-z0-9-]+$/', $slug) === 1, 'slug must be URL-safe: ' . $slug);
         assert_true(strlen($slug) >= 3, 'slug too short: ' . $slug);
     }
+});
+
+// --- TASK-7: Share by name ---
+
+// Helper: run the ranked search query directly against the DB
+function search_docs(string $q): array {
+    $stmt = db()->prepare('
+        SELECT *,
+          CASE
+            WHEN lower(title) = lower(:q)           THEN 0
+            WHEN lower(title) LIKE lower(:q) || \'%\' THEN 1
+            ELSE                                         2
+          END AS match_rank
+        FROM documents
+        WHERE lower(title) LIKE \'%\' || lower(:q) || \'%\'
+        ORDER BY match_rank ASC, title ASC
+        LIMIT 50
+    ');
+    $stmt->execute([':q' => $q]);
+    return $stmt->fetchAll();
+}
+
+test('search exact match returns rank 0', function () {
+    $rows = search_docs('Welcome Packet');
+    assert_true(count($rows) >= 1, 'expected at least one result');
+    assert_true((int) $rows[0]['match_rank'] === 0, 'expected rank 0 for exact match, got ' . $rows[0]['match_rank']);
+    assert_true($rows[0]['title'] === 'Welcome Packet', 'unexpected title: ' . $rows[0]['title']);
+});
+
+test('search prefix match returns rank 1', function () {
+    $rows = search_docs('Welcome');
+    assert_true(count($rows) >= 1, 'expected at least one result');
+    assert_true((int) $rows[0]['match_rank'] === 1, 'expected rank 1 for prefix match, got ' . $rows[0]['match_rank']);
+});
+
+test('search contains match returns rank 2', function () {
+    $rows = search_docs('Packet');
+    assert_true(count($rows) >= 1, 'expected at least one result for contains match');
+    assert_true((int) $rows[0]['match_rank'] === 2, 'expected rank 2 for contains-only match, got ' . $rows[0]['match_rank']);
+});
+
+test('search is case-insensitive', function () {
+    $rows = search_docs('WELCOME PACKET');
+    assert_true(count($rows) >= 1, 'expected result for uppercase query');
+    assert_true((int) $rows[0]['match_rank'] === 0, 'expected rank 0 for case-insensitive exact match, got ' . $rows[0]['match_rank']);
+});
+
+test('search returns empty for no match', function () {
+    $rows = search_docs('zzz_no_such_document_zzz');
+    assert_true(count($rows) === 0, 'expected no results for unmatched query');
 });
 
 echo "\n{$pass} passed, {$fail} failed.\n";

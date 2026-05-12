@@ -107,6 +107,11 @@ render_header('Admin', $staff);
 </section>
 <?php endif ?>
 
+<form method="get" action="/results.php" class="search-form">
+    <input type="search" name="q" placeholder="Search documents by title…" required>
+    <button type="submit" class="btn">Search</button>
+</form>
+
 <section class="card">
     <h2 class="card-title">Documents</h2>
     <?php if (empty($docs)): ?>
