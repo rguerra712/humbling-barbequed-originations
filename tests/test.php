@@ -44,5 +44,30 @@ test('seeded share link resolves to the seeded document', function () {
     assert_true($row['title'] === 'Welcome Packet', 'unexpected title: ' . var_export($row['title'], true));
 });
 
+test('migrate.php creates schema_migrations table and records applied files', function () {
+    $migrationsDir = __DIR__ . '/../migrations';
+    $tmpFile = $migrationsDir . '/999_test_migration.sql';
+    file_put_contents($tmpFile, "CREATE TABLE IF NOT EXISTS _migration_test (id INTEGER PRIMARY KEY);");
+
+    try {
+        system('php ' . escapeshellarg(__DIR__ . '/../migrate.php') . ' > /dev/null', $rc);
+        assert_true($rc === 0, 'migrate.php exited non-zero');
+
+        $row = db()->query("SELECT filename FROM schema_migrations WHERE filename = '999_test_migration.sql'")->fetch();
+        assert_true($row !== false, 'migration file not recorded in schema_migrations');
+
+        $tables = db()->query("SELECT name FROM sqlite_master WHERE type='table' AND name='_migration_test'")->fetch();
+        assert_true($tables !== false, '_migration_test table not created by migration');
+
+        // Running again is idempotent
+        system('php ' . escapeshellarg(__DIR__ . '/../migrate.php') . ' > /dev/null', $rc2);
+        assert_true($rc2 === 0, 'second migrate.php run exited non-zero');
+        $count = db()->query("SELECT COUNT(*) FROM schema_migrations WHERE filename = '999_test_migration.sql'")->fetchColumn();
+        assert_true((int)$count === 1, 'migration recorded more than once');
+    } finally {
+        unlink($tmpFile);
+    }
+});
+
 echo "\n{$pass} passed, {$fail} failed.\n";
 exit($fail > 0 ? 1 : 0);
