@@ -5,7 +5,9 @@ TASK-6 — Customers want each document to have a short, memorable, speakable sl
 
 ## Approach
 
-**Slug generation via Gemini.** A new `lib/gemini.php` provides a single function `gemini_suggest_slugs(string $title): array` that returns up to 3 URL-safe slug strings. It first sends a PII-detection prompt; if Gemini flags the title as containing PII, it requests three random two-to-three-word combinations (called three separate times as the issue specifies). If no PII, it passes the title and asks Gemini for three creative but readable slugs. Any option that already exists in the `documents.slug` column is filtered out; missing slots are refilled by calling Gemini again until 3 unique options are available (or a retry ceiling is hit).
+**Slug generation via Gemini.** A new `lib/gemini.php` provides a single function `gemini_suggest_slugs(string $title): array` that returns up to 3 URL-safe slug strings. Slugs are lowercase, hyphen-separated words (e.g. `river-table-moon`), 2–4 words, using the `gemini-2.0-flash` model. The function first sends a PII-detection prompt; if Gemini flags the title as containing PII, it requests three random word combinations (called three separate times as the issue specifies). If no PII, it passes the title and asks Gemini for three creative but readable slugs. Any option that already exists in the `documents.slug` column is filtered out; missing slots are refilled by calling Gemini again until 3 unique options are available (or a retry ceiling is hit).
+
+**Gemini fallback.** If the Gemini API call fails (network error, quota exceeded, invalid key), the system falls back to a deterministic slug derived from the document title: lowercased, non-alphanumeric characters replaced with hyphens, consecutive hyphens collapsed (e.g. "Q3 Revenue (Draft)" → `q3-revenue-draft`). If that slug already exists in the DB, a random 4-digit number is appended and retried until a unique slug is found (e.g. `q3-revenue-draft-4821`). This ensures document creation never fails due to Gemini unavailability.
 
 **Two-step creation flow in `admin.php`.** The document creation form gains a second phase: on the first POST, the server calls Gemini and re-renders the form with a radio-button list of slug choices (no document is written yet). On the second POST (distinguished by a hidden `step=choose_slug` field containing the title, body, and slug options), the chosen slug is validated for uniqueness and the document is inserted. This keeps all logic server-side with no JS dependency, consistent with the rest of the app.
 
@@ -17,7 +19,7 @@ TASK-6 — Customers want each document to have a short, memorable, speakable sl
 
 | File | Change |
 |------|--------|
-| `lib/gemini.php` | New file. `gemini_suggest_slugs(string $title): array` — PII detection, suggestion generation, uniqueness filtering. |
+| `lib/gemini.php` | New file. `gemini_suggest_slugs(string $title): array` — PII detection, suggestion generation, uniqueness filtering, title-based fallback on API failure. |
 | `public/admin.php` | Two-step creation flow: step 1 calls Gemini and renders slug choices; step 2 validates slug and inserts document. Display slug in the documents table. |
 | `migrations/002_add_document_slug.sql` | Add `slug TEXT UNIQUE` column to `documents`; create index for searchability. |
 | `seed.php` | Assign a static slug to the seeded document so tests have a known baseline and the unique constraint is satisfied on seed. |
@@ -50,11 +52,10 @@ Note: `UNIQUE` on a nullable column in SQLite allows multiple NULLs, so existing
 
 ## Open questions
 
-- **Slug format constraints**: The issue mentions "short, speakable" but does not specify max length, character set, or separator. Plan assumes lowercase, hyphen-separated words (e.g., `river-table-moon`), 2–4 words. Confirm with product if a different format is expected.
 - **Slug editability**: Should staff be able to change a document's slug after creation? The issue doesn't mention it; this plan treats it as out of scope.
-- **Gemini model/version to use**: The issue says "use the Gemini API" but doesn't specify a model. Plan will default to `gemini-2.0-flash` (fast, low-cost) unless a specific model is required.
-- **PII definition**: What counts as PII? The issue implies the Gemini prompt makes this judgement. Should there be a fallback if Gemini is unavailable (network error, quota exceeded)? Plan will fail open with a user-visible error and abort document creation.
 - **Slug collision under load**: With 3 calls for random words and a small vocabulary, collision probability grows with document count. For this app's scale it's acceptable; flag for future if document volume grows.
+
+_Resolved:_ Slug format confirmed as lowercase hyphen-separated, 2–4 words. Gemini model confirmed as `gemini-2.0-flash`. Fallback on Gemini failure: slugify the title (lowercase + dashes); if that slug exists, append a random 4-digit number and retry.
 
 ## Out of scope
 
