@@ -6,6 +6,20 @@ A small document-sharing app.
 
 Requires Docker (with Compose). That's it — PHP, SQLite, and everything else ship inside the container.
 
+### Environment variables
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `GEMINI_API_KEY` | Recommended | Gemini API key used to generate human-readable document slugs. If absent, slugs fall back to a title-derived format. |
+
+Set the variable in your shell before starting the app:
+
+```bash
+export GEMINI_API_KEY=your_key_here
+```
+
+> **Security note:** Never commit your API key. The key is read from your shell environment at `docker compose up` time via the `${GEMINI_API_KEY}` placeholder in `docker-compose.yml`. A `.env.example` file lists all required variables; copy it to `.env` if you prefer a file-based approach — `.env` is listed in `.gitignore` and will not be committed.
+
 ```
 docker compose up
 ```
