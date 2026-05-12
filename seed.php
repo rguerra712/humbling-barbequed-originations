@@ -10,6 +10,8 @@ if (file_exists($dbPath)) {
 $pdo = db();
 $pdo->exec(file_get_contents(__DIR__ . '/schema.sql'));
 
+system('php ' . escapeshellarg(__DIR__ . '/migrate.php') . ' > /dev/null');
+
 $pdo->exec("
     INSERT INTO staff (email, name) VALUES
         ('freddy@folio.example', 'Freddy Folio')

@@ -6,7 +6,7 @@ require __DIR__ . '/../lib/layout.php';
 $token = $_GET['token'] ?? '';
 
 $stmt = db()->prepare('
-    SELECT d.*, s.recipient_email
+    SELECT d.*, s.recipient_email, s.publish_at
     FROM shares s
     JOIN documents d ON d.id = s.document_id
     WHERE s.token = ?
@@ -21,6 +21,19 @@ if (!$doc) {
     <div class="centered-message">
         <h1>Share link not found</h1>
         <p>The link you used is invalid or has been removed.</p>
+    </div>
+    <?php
+    render_footer();
+    exit;
+}
+
+if ($doc['publish_at'] !== null && time() < strtotime($doc['publish_at'])) {
+    render_header($doc['title']);
+    ?>
+    <h1 class="page-title"><?= h($doc['title']) ?></h1>
+    <div class="centered-message">
+        <p>This document is not yet available.</p>
+        <p>It will be available from <?= h($doc['publish_at']) ?>.</p>
     </div>
     <?php
     render_footer();

@@ -29,16 +29,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Recipient email is required.';
     } else {
         $token = random_token();
+        $publishAt = trim($_POST['publish_at'] ?? '') ?: null;
         $stmt = db()->prepare('
-            INSERT INTO shares (document_id, token, recipient_email)
-            VALUES (?, ?, ?)
+            INSERT INTO shares (document_id, token, recipient_email, publish_at)
+            VALUES (?, ?, ?, ?)
         ');
-        $stmt->execute([$doc['id'], $token, $email]);
+        $stmt->execute([$doc['id'], $token, $email, $publishAt]);
         $shareId = (int) db()->lastInsertId();
         audit_log('create', 'share', $shareId, [
             'document_id' => $doc['id'],
             'recipient_email' => $email,
         ]);
+        if ($publishAt !== null) {
+            audit_log('schedule', 'share', $shareId, ['publish_at' => $publishAt]);
+        }
         $created_token = $token;
     }
 }
@@ -68,6 +72,10 @@ render_header('Share · ' . $doc['title'], $staff);
         <div class="form-field">
             <label for="email">Recipient email</label>
             <input type="email" id="email" name="email" required>
+        </div>
+        <div class="form-field">
+            <label for="publish_at">Available from (optional)</label>
+            <input type="datetime-local" id="publish_at" name="publish_at">
         </div>
         <button type="submit" class="btn">Generate link</button>
     </form>

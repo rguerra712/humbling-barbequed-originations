@@ -69,5 +69,36 @@ test('migrate.php creates schema_migrations table and records applied files', fu
     }
 });
 
+test('share with past publish_at allows body to be shown', function () {
+    $pastTime = date('Y-m-d H:i:s', time() - 3600);
+    $token = random_token();
+    $stmt = db()->prepare('INSERT INTO shares (document_id, token, recipient_email, publish_at) VALUES (1, ?, ?, ?)');
+    $stmt->execute([$token, 'past@example.com', $pastTime]);
+
+    $stmt = db()->prepare('SELECT d.*, s.publish_at FROM shares s JOIN documents d ON d.id = s.document_id WHERE s.token = ?');
+    $stmt->execute([$token]);
+    $doc = $stmt->fetch();
+
+    assert_true($doc !== false, 'share not found');
+    $embargoed = $doc['publish_at'] !== null && time() < strtotime($doc['publish_at']);
+    assert_true(!$embargoed, 'expected body to be visible for past publish_at');
+});
+
+test('share with future publish_at withholds body and retains title', function () {
+    $futureTime = date('Y-m-d H:i:s', time() + 3600);
+    $token = random_token();
+    $stmt = db()->prepare('INSERT INTO shares (document_id, token, recipient_email, publish_at) VALUES (1, ?, ?, ?)');
+    $stmt->execute([$token, 'future@example.com', $futureTime]);
+
+    $stmt = db()->prepare('SELECT d.title, d.body, s.publish_at FROM shares s JOIN documents d ON d.id = s.document_id WHERE s.token = ?');
+    $stmt->execute([$token]);
+    $doc = $stmt->fetch();
+
+    assert_true($doc !== false, 'share not found');
+    $embargoed = $doc['publish_at'] !== null && time() < strtotime($doc['publish_at']);
+    assert_true($embargoed, 'expected body to be withheld for future publish_at');
+    assert_true($doc['title'] !== '', 'title should still be accessible');
+});
+
 echo "\n{$pass} passed, {$fail} failed.\n";
 exit($fail > 0 ? 1 : 0);
